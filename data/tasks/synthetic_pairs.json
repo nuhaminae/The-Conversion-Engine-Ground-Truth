@@ -1,0 +1,16 @@
+[
+  {
+    "prospect_input": "Yes, Tuesday at 3 PM works for me.",
+    "agent_output": "Perfect, I\u2019ll schedule the meeting for Tuesday at 3 PM and send you a calendar invite.",
+    "label": 1,
+    "failure_mode_tag": "Missed intent: scheduling",
+    "metadata": "Synthetic preference pair"
+  },
+  {
+    "prospect_input": "Yes, Tuesday at 3 PM works for me.",
+    "agent_output": "Okay, thanks for letting me know.",
+    "label": 0,
+    "failure_mode_tag": "Missed intent: scheduling",
+    "metadata": "Synthetic preference pair"
+  }
+]
