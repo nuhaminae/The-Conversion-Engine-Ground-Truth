@@ -1,0 +1,32 @@
+# configs/eval_config.yaml
+# 
+# It locks in evaluation parameters so Judge and Baseline scripts run consistently and reproducibly.
+
+data:
+  heldout_file: "data/splits/heldout.json"   # Held-out evaluation set
+  output_dir: "reports"                      # Directory to save metrics and plots
+
+metrics:
+  # Metrics to compute during evaluation
+  compute: ["accuracy", "precision", "recall", "f1"]
+  average: "binary"                          # Averaging method for precision/recall/F1
+
+plots:
+  confusion_matrix:
+    judge_filename: "judge_confusion_matrix.png"
+    baseline_filename: "baseline_confusion_matrix.png"
+    cmap_judge: "Blues"
+    cmap_baseline: "Reds"
+    labels: ["Bad Output", "Good Output"]
+
+logging:
+  judge_log: "reports/eval_judge.log"
+  baseline_log: "reports/eval_baseline.log"
+
+comparison:
+  # Notebook visualisation settings
+  notebook: "notebooks/evaluation_results.ipynb"
+  html_output: "reports/evaluation_results.html"
+  chart_filename: "comparison_chart.png"
+
+seed: 42   # Random seed for reproducibility
