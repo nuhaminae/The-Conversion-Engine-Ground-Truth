@@ -6,11 +6,13 @@ Provides accuracy, precision, recall, F1, and confusion matrix plotting.
 """
 
 import os
-import numpy as np
-import matplotlib.pyplot as plt
+
 import evaluate
-from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
+from sklearn.metrics import confusion_matrix
+
 
 # -----------------------------
 # Compute Metrics
@@ -28,15 +30,28 @@ def compute_classification_metrics(predictions, labels):
 
     metrics = {}
     metrics.update(accuracy.compute(predictions=predictions, references=labels))
-    metrics.update(precision.compute(predictions=predictions, references=labels, average="binary"))
-    metrics.update(recall.compute(predictions=predictions, references=labels, average="binary"))
-    metrics.update(f1.compute(predictions=predictions, references=labels, average="binary"))
+    metrics.update(
+        precision.compute(predictions=predictions, references=labels, average="binary")
+    )
+    metrics.update(
+        recall.compute(predictions=predictions, references=labels, average="binary")
+    )
+    metrics.update(
+        f1.compute(predictions=predictions, references=labels, average="binary")
+    )
     return metrics
+
 
 # -----------------------------
 # Confusion Matrix Plot
 # -----------------------------
-def plot_confusion_matrix(predictions, labels, output_dir, filename="confusion_matrix.png", title="Confusion Matrix"):
+def plot_confusion_matrix(
+    predictions,
+    labels,
+    output_dir,
+    filename="confusion_matrix.png",
+    title="Confusion Matrix",
+):
     """
     Plot and save confusion matrix heatmap.
     predictions: list/array of predicted labels
@@ -47,9 +62,14 @@ def plot_confusion_matrix(predictions, labels, output_dir, filename="confusion_m
     """
     cm = confusion_matrix(labels, predictions)
     plt.figure(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
-                xticklabels=["Bad Output", "Good Output"],
-                yticklabels=["Bad Output", "Good Output"])
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=["Bad Output", "Good Output"],
+        yticklabels=["Bad Output", "Good Output"],
+    )
     plt.xlabel("Predicted")
     plt.ylabel("True")
     plt.title(title)
