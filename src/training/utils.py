@@ -2,10 +2,11 @@
 #
 # A centralised logging, JSON saving/loading, and keyword heuristics source file. Keep other scripts stay lean and reusable.
 
-import os
 import json
 import logging
+import os
 from datetime import datetime
+
 
 # -----------------------------
 # Logging Setup
@@ -32,6 +33,7 @@ def setup_logger(name="judge_logger", log_file="training.log", level=logging.INF
 
     return logger
 
+
 # -----------------------------
 # JSON Helpers
 # -----------------------------
@@ -42,10 +44,12 @@ def save_json(data, filepath):
         json.dump(data, f, indent=2)
     return filepath
 
+
 def load_json(filepath):
     """Load JSON file into Python object."""
     with open(filepath, "r", encoding="utf-8") as f:
         return json.load(f)
+
 
 # -----------------------------
 # Keyword Heuristic (Baseline)
@@ -58,6 +62,7 @@ def heuristic_is_good(agent_output):
     keywords = ["schedule", "invite", "calendar", "meeting", "call"]
     text = agent_output.lower()
     return any(k in text for k in keywords)
+
 
 # -----------------------------
 # Timestamp Helper
