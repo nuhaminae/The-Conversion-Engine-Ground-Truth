@@ -73,6 +73,6 @@
 
 ## 9. Maintenance
 
-- **Maintainers:** [Your team name].  
+- **Maintainers:** Nuhamin A.  
 - **Update frequency:** Iterative updates as new failure modes are discovered.  
-- **Contact:** [Your email or GitHub handle].  
+- **Contact:** `https://github.com/nuhaminae`.  
