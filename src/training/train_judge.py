@@ -6,22 +6,21 @@ This script fine-tunes a HuggingFace model using preference optimisation
 to enforce consistency in agent outputs (e.g., scheduling after prospect says "yes").
 """
 
-import os
 import argparse
+import os
+
+import evaluate
+import numpy as np
 import torch
+from datasets import load_dataset
+from dotenv import load_dotenv
 from torch.utils.data import Dataset
 from transformers import (
-    AutoTokenizer,
     AutoModelForSequenceClassification,
+    AutoTokenizer,
     Trainer,
     TrainingArguments,
 )
-from datasets import load_dataset
-import numpy as np
-import evaluate
-
-from dotenv import load_dotenv
-import os
 
 # Load environment variables from .env
 load_dotenv()
@@ -32,7 +31,6 @@ WANDB_PROJECT = os.getenv("WANDB_PROJECT", "tenacious-judge")
 WANDB_ENTITY = os.getenv("WANDB_ENTITY")
 
 
-
 from huggingface_hub import HfApi
 
 if HF_TOKEN:
@@ -41,17 +39,13 @@ if HF_TOKEN:
     print("✅ HuggingFace Hub authenticated")
 else:
     print("⚠️ No HF_TOKEN found in .env")
-    
+
 
 import wandb
 
 if WANDB_API_KEY:
     wandb.login(key=WANDB_API_KEY)
-    wandb.init(
-        project=WANDB_PROJECT,
-        entity=WANDB_ENTITY,
-        name="judge-training-v1"
-    )
+    wandb.init(project=WANDB_PROJECT, entity=WANDB_ENTITY, name="judge-training-v1")
     print("✅ W&B tracking initialized")
 else:
     print("⚠️ No WANDB_API_KEY found in .env")
@@ -72,7 +66,9 @@ class PreferenceDataset(Dataset):
     def __getitem__(self, idx):
         example = self.dataset[idx]
         # Concatenate prospect input + agent output for scoring
-        text = f"Prospect: {example['prospect_input']}\nAgent: {example['agent_output']}"
+        text = (
+            f"Prospect: {example['prospect_input']}\nAgent: {example['agent_output']}"
+        )
         inputs = self.tokenizer(
             text,
             truncation=True,
@@ -84,6 +80,7 @@ class PreferenceDataset(Dataset):
         inputs["labels"] = torch.tensor(example["label"], dtype=torch.long)
         return inputs
 
+
 # -----------------------------
 # Compute Metrics
 # -----------------------------
@@ -93,6 +90,7 @@ def compute_metrics(eval_pred):
     predictions = np.argmax(logits, axis=-1)
     return metric.compute(predictions=predictions, references=labels)
 
+
 # -----------------------------
 # Main Training Function
 # -----------------------------
@@ -100,16 +98,18 @@ def main(args):
     # Load tokenizer & model
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     model = AutoModelForSequenceClassification.from_pretrained(
-        args.model_name,
-        num_labels=2
+        args.model_name, num_labels=2
     )
 
     # Load dataset (expects train/dev/test splits)
-    dataset = load_dataset("json", data_files={
-        "train": os.path.join(args.data_dir, "train.json"),
-        "validation": os.path.join(args.data_dir, "dev.json"),
-        "test": os.path.join(args.data_dir, "heldout.json"),
-    })
+    dataset = load_dataset(
+        "json",
+        data_files={
+            "train": os.path.join(args.data_dir, "train.json"),
+            "validation": os.path.join(args.data_dir, "dev.json"),
+            "test": os.path.join(args.data_dir, "heldout.json"),
+        },
+    )
 
     # Wrap datasets
     train_dataset = PreferenceDataset(dataset["train"], tokenizer)
@@ -154,24 +154,41 @@ def main(args):
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
 
+
 # -----------------------------
 # CLI
 # -----------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Judge/Critic model")
-    parser.add_argument("--model_name", type=str, default="distilbert-base-uncased",
-                        help="Base model to fine-tune")
-    parser.add_argument("--data_dir", type=str, default="data/splits",
-                        help="Directory containing train/dev/test JSON files")
-    parser.add_argument("--output_dir", type=str, default="models/judge",
-                        help="Directory to save model outputs")
-    parser.add_argument("--batch_size", type=int, default=16,
-                        help="Batch size per device")
-    parser.add_argument("--learning_rate", type=float, default=5e-5,
-                        help="Learning rate")
-    parser.add_argument("--epochs", type=int, default=3,
-                        help="Number of training epochs")
-    parser.add_argument("--use_wandb", action="store_true",
-                        help="Log training to Weights & Biases")
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="distilbert-base-uncased",
+        help="Base model to fine-tune",
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default="data/splits",
+        help="Directory containing train/dev/test JSON files",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="models/judge",
+        help="Directory to save model outputs",
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=16, help="Batch size per device"
+    )
+    parser.add_argument(
+        "--learning_rate", type=float, default=5e-5, help="Learning rate"
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=3, help="Number of training epochs"
+    )
+    parser.add_argument(
+        "--use_wandb", action="store_true", help="Log training to Weights & Biases"
+    )
     args = parser.parse_args()
     main(args)
