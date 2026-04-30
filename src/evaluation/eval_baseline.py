@@ -5,15 +5,15 @@ Evaluate the Week 10 baseline agent outputs on the Tenacious Sales Evaluation Be
 Uses utils.py for logging/JSON and metrics.py for evaluation metrics.
 """
 
-import os
 import argparse
 import json
-from src.training.utils import setup_logger, save_json, heuristic_is_good, timestamp
-from src.evaluation.metrics import compute_classification_metrics, plot_confusion_matrix
-
-from dotenv import load_dotenv
 import os
+
 import wandb
+from dotenv import load_dotenv
+
+from src.evaluation.metrics import compute_classification_metrics, plot_confusion_matrix
+from src.training.utils import heuristic_is_good, save_json, setup_logger, timestamp
 
 # Load environment variables
 load_dotenv()
@@ -21,6 +21,7 @@ load_dotenv()
 WANDB_API_KEY = os.getenv("WANDB_API_KEY")
 WANDB_PROJECT = os.getenv("WANDB_PROJECT", "tenacious-judge")
 WANDB_ENTITY = os.getenv("WANDB_ENTITY")
+
 
 def init_wandb(run_name):
     """Initialise W&B if API key is present."""
@@ -34,11 +35,13 @@ def init_wandb(run_name):
 
 
 def main(args):
-    
+
     # Initialise W&B
     wandb_enabled = init_wandb("baseline-eval-v1")
 
-    logger = setup_logger("eval_baseline", os.path.join(args.output_dir, "eval_baseline.log"))
+    logger = setup_logger(
+        "eval_baseline", os.path.join(args.output_dir, "eval_baseline.log")
+    )
     logger.info(f"Starting baseline evaluation at {timestamp()}")
 
     with open(os.path.join(args.data_dir, "heldout.json"), "r", encoding="utf-8") as f:
@@ -55,12 +58,25 @@ def main(args):
 
     if wandb_enabled:
         wandb.log(results)
-        wandb.log({"baseline_confusion_matrix": wandb.Image(os.path.join(args.output_dir, "baseline_confusion_matrix.png"))})
-        
-    plot_confusion_matrix(predictions, labels, args.output_dir,
-                          filename="baseline_confusion_matrix.png",
-                          title="Baseline Agent Confusion Matrix")
-    logger.info(f"Baseline confusion matrix saved to {args.output_dir}/baseline_confusion_matrix.png")
+        wandb.log(
+            {
+                "baseline_confusion_matrix": wandb.Image(
+                    os.path.join(args.output_dir, "baseline_confusion_matrix.png")
+                )
+            }
+        )
+
+    plot_confusion_matrix(
+        predictions,
+        labels,
+        args.output_dir,
+        filename="baseline_confusion_matrix.png",
+        title="Baseline Agent Confusion Matrix",
+    )
+    logger.info(
+        f"Baseline confusion matrix saved to {args.output_dir}/baseline_confusion_matrix.png"
+    )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate Week 10 baseline agent")
