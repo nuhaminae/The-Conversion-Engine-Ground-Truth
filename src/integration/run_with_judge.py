@@ -2,22 +2,24 @@
 #
 # Pipeline integration: agent generates → judge scores → decision.
 
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from dotenv import load_dotenv
 import os
+
+import torch
+from dotenv import load_dotenv
 from huggingface_hub import HfApi, HfFolder, upload_file
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 # Load secrets
 load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")
-HF_REPO = os.getenv("HF_REPO", "your-username/the-conversion-ground-truth")
+HF_REPO = os.getenv("HF_REPO", "nuhaminae/the-conversion-engine-ground-truth")
 
 
 def load_judge(model_dir="models/judge"):
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
     model = AutoModelForSequenceClassification.from_pretrained(model_dir)
     return tokenizer, model
+
 
 def judge_output(prospect_input, agent_output, tokenizer, model):
     text = f"Prospect: {prospect_input}\nAgent: {agent_output}"
@@ -26,6 +28,7 @@ def judge_output(prospect_input, agent_output, tokenizer, model):
         logits = model(**inputs).logits
     pred = torch.argmax(logits, dim=-1).item()
     return pred  # 1 = good, 0 = bad
+
 
 def push_results_to_hub(local_file, repo_id, path_in_repo):
     """Upload a file to HuggingFace Hub if HF_TOKEN is available."""
@@ -36,11 +39,12 @@ def push_results_to_hub(local_file, repo_id, path_in_repo):
             path_or_fileobj=local_file,
             path_in_repo=path_in_repo,
             repo_id=repo_id,
-            repo_type="model"  # or "dataset" depending on artifact
+            repo_type="model",  # or "dataset" depending on artifact
         )
         print(f"✅ Uploaded {local_file} to {repo_id}/{path_in_repo}")
     else:
         print("⚠️ No HF_TOKEN found in .env, skipping HuggingFace upload")
+
 
 if __name__ == "__main__":
     tokenizer, model = load_judge()
@@ -48,11 +52,13 @@ if __name__ == "__main__":
     agent = "Okay, thanks for letting me know."
     score = judge_output(prospect, agent, tokenizer, model)
     print("Judge score:", score)
-    
+
     # Save result locally
     result_file = "reports/judge_integration_result.json"
     with open(result_file, "w", encoding="utf-8") as f:
         f.write(f'{{"prospect":"{prospect}","agent":"{agent}","score":{score}}}')
 
     # Push to HuggingFace Hub
-    push_results_to_hub(result_file, HF_REPO, "integration/judge_integration_result.json")
+    push_results_to_hub(
+        result_file, HF_REPO, "integration/judge_integration_result.json"
+    )
