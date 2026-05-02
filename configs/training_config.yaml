@@ -3,33 +3,31 @@
 # It locks in hyperparameters and LoRA settings for reproducibility and makes your training pipeline easy to rerun or share.
 
 model:
-  base_model: "distilbert-base-uncased"   # HuggingFace model to fine-tune
-  num_labels: 2                          # Binary classification (good vs bad)
+  base_model: "unsloth/Phi-3-mini-4k-instruct"                # HuggingFace model to fine-tune
   lora:
     enabled: true
-    r: 8                                 # Rank of LoRA matrices
-    alpha: 16                            # Scaling factor
-    dropout: 0.1                         # Dropout for LoRA layers
-    target_modules: ["q_proj", "v_proj"] # Modules to apply LoRA
+    r: 16                                                     # Rank of LoRA matrices
+    alpha: 32                                                 # Scaling factor
+    dropout: 0.05                                             # Dropout for LoRA layers
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]  # Modules to apply LoRA
 
 data:
-  train_file: "data/splits/train.json"
-  dev_file: "data/splits/dev.json"
-  test_file: "data/splits/heldout.json"
-  max_length: 512                        # Max token length
-
+  train_file: "data/training_data/preferences_train.jsonl"    # Path to the preference pair dataset that will be created.
+  dev_file: "data/training_data/preferences_dev.jsonl"
+  max_length: 2048                                            # Max token length that should accommodate prompt, chosen, and rejected responses.
+  
 training:
-  batch_size: 16
-  learning_rate: 5e-5
+  # DPO-specific hyperparameters
+  beta: 0.1                                                 # The regularization parameter for DPO
+  batch_size: 2                                             # DPO is memory intensive, so small batches are needed.
+  gradient_accumulation_steps: 8                            # Accumulate gradients to simulate a larger batch size
+  learning_rate: 2e-5
   weight_decay: 0.01
   num_epochs: 3
-  warmup_steps: 100
-  gradient_accumulation_steps: 1
-  logging_steps: 50
+  warmup_ratio: 0.1 
+  logging_steps: 10
   save_strategy: "epoch"
   evaluation_strategy: "epoch"
-  load_best_model_at_end: true
-  metric_for_best_model: "accuracy"
 
 output:
   model_dir: "models/judge"
@@ -37,8 +35,8 @@ output:
   logging_dir: "reports/logs"
 
 reporting:
-  use_wandb: true        # Set to false if not using Weights & Biases
-  wandb_project: "tenacious-judge"
-  wandb_run_name: "judge-training-v1"
+  use_wandb: false                                         # Set to false if not using Weights & Biases
+  wandb_project: "tenacious-judge-dpo"
+  wandb_run_name: "dpo-phi3-judge-v1"
 
-seed: 42                 # Random seed for reproducibility
+seed: 42                                                   # Random seed for reproducibility
