@@ -288,9 +288,9 @@ Verdict:""".strip()
 
 
 def load_model_and_tokenizer(config: Dict[str, Any]):
-    
+
     hf_token = os.getenv("HF_TOKEN", "").strip() or None
-    
+
     prompted_cfg = config.get("prompted_judge", {})
     judge_cfg = config.get("judge", {})
 
@@ -308,7 +308,7 @@ def load_model_and_tokenizer(config: Dict[str, Any]):
 
     print(f"Loading prompted judge base model: {base_model}")
     print(f"Loading tokenizer: {tokenizer_name}")
-    
+
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_name,
         use_fast=True,
@@ -337,9 +337,10 @@ def load_model_and_tokenizer(config: Dict[str, Any]):
         model_kwargs["dtype"] = torch.float32
 
     model = AutoModelForCausalLM.from_pretrained(
-    base_model,
-    token=hf_token,
-    **model_kwargs,)
+        base_model,
+        token=hf_token,
+        **model_kwargs,
+    )
     model.eval()
 
     return model, tokenizer, base_model
@@ -543,7 +544,7 @@ def plot_confusion_matrix(
 def main(config_path: str) -> None:
     config = load_yaml(config_path)
 
-    output_dir = config["data"].get("output_dir", "reports")
+    output_dir = config["data"].get("output_dir", "reports/evaluation")
     ensure_dir(output_dir)
 
     log_path = config.get("logging", {}).get(
