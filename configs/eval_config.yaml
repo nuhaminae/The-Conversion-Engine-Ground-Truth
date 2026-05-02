@@ -1,32 +1,68 @@
 # configs/eval_config.yaml
-# 
-# It locks in evaluation parameters so Judge and Baseline scripts run consistently and reproducibly.
+#
+# Evaluation config for Week 11 Path B.
+#
+# The fine-tuned judge is a DPO-trained LoRA adapter on a causal LM.
+# Evaluation compares the DPO reward of chosen vs rejected responses on held-out preference pairs.
 
 data:
-  heldout_file: "data/splits/heldout.json"   # Held-out evaluation set
-  output_dir: "reports"                      # Directory to save metrics and plots
+  # Prefer DPO-formatted held-out pairs.
+  heldout_dpo_file: "tenacious_bench/dpo/held_out_dpo.jsonl"
+
+  # Fallback pointwise held-out file, used only if heldout_dpo_file is missing.
+  heldout_file: "tenacious_bench/held_out/held_out.jsonl"
+
+  # Directory to save metrics, scores, plots, and logs.
+  output_dir: "reports"
+
+judge:
+  # Must match the base model used in configs/training_config.yaml.
+  base_model: "unsloth/Llama-3.2-1B-Instruct-bnb-4bit"
+
+  # LoRA adapter produced by train_judge.py.
+  adapter_dir: "models/judge"
+
+  # Tokenizer saved with the adapter.
+  tokenizer_dir: "models/judge"
+
+  # Match DPO beta used during training.
+  beta: 0.1
+
+  # Match or stay below training max length.
+  max_length: 1024
+
+  # Use summed sequence log-probabilities to mirror DPO trainer behavior.
+  # Set true only if you want length-normalized diagnostic scoring.
+  average_logprob: false
+
+  # Use 4-bit model loading when running on Colab/T4.
+  load_in_4bit: true
 
 metrics:
-  # Metrics to compute during evaluation
-  compute: ["accuracy", "precision", "recall", "f1"]
-  average: "binary"                          # Averaging method for precision/recall/F1
+  compute: ["accuracy", "precision", "recall", "f1", "pairwise_accuracy"]
+  average: "binary"
 
 plots:
   confusion_matrix:
-    judge_filename: "judge_confusion_matrix.png"
+    judge_filename: "fine_tuned_judge_confusion_matrix.png"
+    prompted_judge_filename: "prompted_judge_confusion_matrix.png"
     baseline_filename: "baseline_confusion_matrix.png"
-    cmap_judge: "Blues"
-    cmap_baseline: "Reds"
     labels: ["Bad Output", "Good Output"]
 
 logging:
-  judge_log: "reports/eval_judge.log"
+  judge_log: "reports/eval_fine_tuned_judge.log"
+  prompted_log: "reports/eval_prompted_judge.log"
   baseline_log: "reports/eval_baseline.log"
 
+outputs:
+  fine_tuned_judge_metrics: "reports/fine_tuned_judge_metrics.json"
+  fine_tuned_judge_pair_scores: "reports/fine_tuned_judge_pair_scores.jsonl"
+  prompted_judge_metrics: "reports/prompted_judge_metrics.json"
+  baseline_metrics: "reports/baseline_metrics.json"
+
 comparison:
-  # Notebook visualisation settings
   notebook: "notebooks/evaluation_results.ipynb"
   html_output: "reports/evaluation_results.html"
-  chart_filename: "comparison_chart.png"
+  chart_filename: "ablation_comparison_chart.png"
 
-seed: 42   # Random seed for reproducibility
+seed: 42
