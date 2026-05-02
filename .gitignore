@@ -14,8 +14,6 @@ models/checkpoints/**/rng_state.pth
 models/checkpoints/**/training_args.bin
 models/checkpoints/**/adapter_model.safetensors
 models/checkpoints/**/tokenizer.json
-models/judge/adapter_model.safetensors
-models/judge/tokenizer.json
 
 # Optional local cache/log noise
 wandb/
