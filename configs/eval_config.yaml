@@ -52,7 +52,7 @@ plots:
 logging:
   judge_log: "reports/evaluation/fine_tuned/eval_fine_tuned_judge.log"
   prompted_log: "reports/evaluation/prompted/eval_prompted_judge.log"
-  baseline_log: "reports/evaluation/eval_baseline.log"
+  baseline_log: "reports/evaluation/baseline/eval_baseline.log"
 
 outputs:
   fine_tuned_judge_metrics: "reports/evaluation/fine_tuned/fine_tuned_judge_metrics.json"
@@ -62,7 +62,7 @@ outputs:
   prompted_judge_pointwise_scores: "reports/evaluation/prompted/prompted_judge_pointwise_scores.jsonl"
   prompted_judge_pair_scores: "reports/evaluation/prompted/prompted_judge_pair_scores.jsonl"
 
-  baseline_metrics: "reports/evaluation/baseline_metrics.json"
+  baseline_metrics: "reports/evaluation/baseline/baseline_metrics.json"
 
 comparison:
   notebook: "notebooks/evaluation_results.ipynb"
