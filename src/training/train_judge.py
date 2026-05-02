@@ -1,194 +1,194 @@
 # src/training/train_judge.py
 
 """
-Train a Judge/Critic model for Tenacious Sales Evaluation Benchmark (Path B).
-This script fine-tunes a HuggingFace model using preference optimisation
-to enforce consistency in agent outputs (e.g., scheduling after prospect says "yes").
+Train a Judge/Critic model for the Tenacious Benchmark using Direct Preference Optimisation (DPO).
+This script fine-tunes a decoder model (e.g., Phi-3) using the Unsloth library
+for high-efficiency training on consumer/free-tier GPUs (e.g., Google Colab T4).
 """
 
 import argparse
 import os
 
-import evaluate
-import numpy as np
 import torch
+import wandb
+import yaml
 from datasets import load_dataset
 from dotenv import load_dotenv
-from torch.utils.data import Dataset
-from transformers import (
-    AutoModelForSequenceClassification,
-    AutoTokenizer,
-    Trainer,
-    TrainingArguments,
-)
+from huggingface_hub import HfApi
+from transformers import TrainingArguments
+from trl import DPOTrainer
+
+# Unsloth and TRL for DPO
+from unsloth import FastLanguageModel
+
+# --- Environment and Authentication ---
 
 # Load environment variables from .env
 load_dotenv()
-
 HF_TOKEN = os.getenv("HF_TOKEN")
 WANDB_API_KEY = os.getenv("WANDB_API_KEY")
-WANDB_PROJECT = os.getenv("WANDB_PROJECT", "tenacious-judge")
-WANDB_ENTITY = os.getenv("WANDB_ENTITY")
 
 
-from huggingface_hub import HfApi
+def authenticate_services(config):
+    """Handles authentication for HuggingFace and W&B."""
+    if HF_TOKEN:
+        api = HfApi()
+        api.set_access_token(HF_TOKEN)
+        print("✔️ HuggingFace Hub authenticated.")
+    else:
+        print("⚠️ No HF_TOKEN found in .env. Model pushing will be disabled.")
 
-if HF_TOKEN:
-    api = HfApi()
-    api.set_access_token(HF_TOKEN)
-    print("✅ HuggingFace Hub authenticated")
-else:
-    print("⚠️ No HF_TOKEN found in .env")
-
-
-import wandb
-
-if WANDB_API_KEY:
-    wandb.login(key=WANDB_API_KEY)
-    wandb.init(project=WANDB_PROJECT, entity=WANDB_ENTITY, name="judge-training-v1")
-    print("✅ W&B tracking initialized")
-else:
-    print("⚠️ No WANDB_API_KEY found in .env")
-
-
-# -----------------------------
-# Custom Dataset Wrapper
-# -----------------------------
-class PreferenceDataset(Dataset):
-    def __init__(self, hf_dataset, tokenizer, max_length=512):
-        self.dataset = hf_dataset
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, idx):
-        example = self.dataset[idx]
-        # Concatenate prospect input + agent output for scoring
-        text = (
-            f"Prospect: {example['prospect_input']}\nAgent: {example['agent_output']}"
+    if WANDB_API_KEY and config["reporting"].get("use_wandb", False):
+        wandb.login(key=WANDB_API_KEY)
+        wandb.init(
+            project=config["reporting"]["wandb_project"],
+            name=config["reporting"]["wandb_run_name"],
+            config=config,  # Log the entire config
         )
-        inputs = self.tokenizer(
-            text,
-            truncation=True,
-            padding="max_length",
-            max_length=self.max_length,
-            return_tensors="pt",
+        print("✔️ W&B tracking initialised.")
+    else:
+        print(
+            "⚠️ W&B logging is disabled. No WANDB_API_KEY found or use_wandb is false."
         )
-        inputs = {k: v.squeeze(0) for k, v in inputs.items()}
-        inputs["labels"] = torch.tensor(example["label"], dtype=torch.long)
-        return inputs
+        # Explicitly disable W&B reporting if not configured
+        os.environ["WANDB_DISABLED"] = "true"
 
 
-# -----------------------------
-# Compute Metrics
-# -----------------------------
-def compute_metrics(eval_pred):
-    metric = evaluate.load("accuracy")
-    logits, labels = eval_pred
-    predictions = np.argmax(logits, axis=-1)
-    return metric.compute(predictions=predictions, references=labels)
+def load_dpo_dataset(data_config):
+    """
+    Loads DPO preference data from explicit train/dev files.
+    Required columns: prompt, chosen, rejected.
+    """
+    data_files = {
+        "train": data_config["train_file"],
+        "validation": data_config["dev_file"],
+    }
+
+    for split, path in data_files.items():
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"{split} file not found: {path}. "
+                "Run create_preference_pairs.py with "
+                "--training-data-dir data/training_data first."
+            )
+
+    print(f"Loading DPO dataset from: {data_files}")
+    dataset = load_dataset("json", data_files=data_files)
+
+    required_columns = {"prompt", "chosen", "rejected"}
+    for split_name in ["train", "validation"]:
+        missing = required_columns - set(dataset[split_name].column_names)
+        if missing:
+            raise ValueError(
+                f"{split_name} split is missing required DPO columns: {missing}. "
+                f"Columns found: {dataset[split_name].column_names}"
+            )
+
+    print(f"Train pairs: {len(dataset['train'])}")
+    print(f"Validation pairs: {len(dataset['validation'])}")
+
+    return dataset["train"], dataset["validation"]
 
 
-# -----------------------------
-# Main Training Function
-# -----------------------------
-def main(args):
-    # Load tokenizer & model
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(
-        args.model_name, num_labels=2
+def main(config_path):
+    # --- 1. Load Configuration ---
+    print("Loading configuration from:", config_path)
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    model_config = config["model"]
+    data_config = config["data"]
+    training_config = config["training"]
+
+    # --- 2. Authenticate ---
+    authenticate_services(config)
+
+    # --- 3. Load Model and Tokenizer with Unsloth ---
+    print(f"Loading base model with Unsloth: {model_config['base_model']}")
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=model_config["base_model"],
+        max_seq_length=data_config["max_length"],
+        dtype=None,  # Unsloth handles dtype automatically
+        load_in_4bit=True,  # Critical for memory efficiency on Colab
     )
 
-    # Load dataset (expects train/dev/test splits)
-    dataset = load_dataset(
-        "json",
-        data_files={
-            "train": os.path.join(args.data_dir, "train.json"),
-            "validation": os.path.join(args.data_dir, "dev.json"),
-            "test": os.path.join(args.data_dir, "heldout.json"),
-        },
+    # --- 4. Configure PEFT (LoRA) for efficient tuning ---
+    model = FastLanguageModel.get_peft_model(
+        model,
+        r=model_config["lora"]["r"],
+        target_modules=model_config["lora"]["target_modules"],
+        lora_alpha=model_config["lora"]["alpha"],
+        lora_dropout=model_config["lora"]["dropout"],
+        bias="none",
+        use_gradient_checkpointing=True,
+        random_state=config["seed"],
+        max_seq_length=data_config["max_length"],
     )
+    print("✔️ PEFT (LoRA) configured on the model.")
 
-    # Wrap datasets
-    train_dataset = PreferenceDataset(dataset["train"], tokenizer)
-    eval_dataset = PreferenceDataset(dataset["validation"], tokenizer)
-    test_dataset = PreferenceDataset(dataset["test"], tokenizer)
+    # --- 5. Load and Prepare DPO Dataset ---
+    train_dataset, eval_dataset = load_dpo_dataset(data_config)
 
-    # Training arguments
-    training_args = TrainingArguments(
-        output_dir=args.output_dir,
-        evaluation_strategy="epoch",
-        save_strategy="epoch",
-        learning_rate=args.learning_rate,
-        per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=args.batch_size,
-        num_train_epochs=args.epochs,
-        weight_decay=0.01,
-        logging_dir=os.path.join(args.output_dir, "logs"),
-        logging_steps=50,
-        load_best_model_at_end=True,
-        metric_for_best_model="accuracy",
-        report_to="wandb" if args.use_wandb else "none",
-    )
-
-    # Trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
+    # --- 6. Set up DPO Trainer ---
+    dpo_trainer = DPOTrainer(
+        model,
+        ref_model=None,  # Unsloth handles the reference model automatically
+        args=TrainingArguments(
+            per_device_train_batch_size=training_config["batch_size"],
+            gradient_accumulation_steps=training_config["gradient_accumulation_steps"],
+            warmup_ratio=training_config.get("warmup_ratio", 0.1),
+            num_train_epochs=training_config["num_epochs"],
+            learning_rate=training_config["learning_rate"],
+            fp16=not torch.cuda.is_bf16_supported(),
+            bf16=torch.cuda.is_bf16_supported(),
+            logging_steps=training_config["logging_steps"],
+            optim="adamw_8bit",  # Use 8-bit AdamW for more memory savings
+            weight_decay=training_config["weight_decay"],
+            lr_scheduler_type="linear",
+            seed=config["seed"],
+            output_dir=config["output"]["checkpoint_dir"],
+            evaluation_strategy=training_config["evaluation_strategy"],
+            save_strategy=training_config["save_strategy"],
+            report_to=(
+                "wandb"
+                if WANDB_API_KEY and config["reporting"].get("use_wandb", False)
+                else "none"
+            ),
+        ),
+        beta=training_config["beta"],
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        compute_metrics=compute_metrics,
+        tokenizer=tokenizer,
+        max_length=data_config["max_length"],
+        max_prompt_length=data_config["max_length"] // 2,
     )
+    print("✔️ DPOTrainer initialised.")
 
-    # Train
-    trainer.train()
+    # --- 7. Train the Model ---
+    print("\n--- Starting DPO Training ---\n")
+    dpo_trainer.train()
+    print("\n--- DPO Training Complete ---\n")
 
-    # Evaluate
-    print("Final evaluation on held-out set:")
-    results = trainer.evaluate(test_dataset)
-    print(results)
+    # --- 8. Save the Final LoRA Adapter ---
+    output_dir = config["output"]["model_dir"]
+    print(f"Saving final LoRA adapter to {output_dir}")
+    dpo_trainer.model.save_pretrained(output_dir)
+    tokenizer.save_pretrained(output_dir)
 
-    # Save model
-    trainer.save_model(args.output_dir)
-    tokenizer.save_pretrained(args.output_dir)
+    if WANDB_API_KEY and config["reporting"].get("use_wandb", False):
+        wandb.finish()
 
 
-# -----------------------------
-# CLI
-# -----------------------------
+# --- CLI ---
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train Judge/Critic model")
+    parser = argparse.ArgumentParser(
+        description="Train a DPO Judge/Critic model using a configuration file."
+    )
     parser.add_argument(
-        "--model_name",
+        "--config",
         type=str,
-        default="distilbert-base-uncased",
-        help="Base model to fine-tune",
-    )
-    parser.add_argument(
-        "--data_dir",
-        type=str,
-        default="data/splits",
-        help="Directory containing train/dev/test JSON files",
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="models/judge",
-        help="Directory to save model outputs",
-    )
-    parser.add_argument(
-        "--batch_size", type=int, default=16, help="Batch size per device"
-    )
-    parser.add_argument(
-        "--learning_rate", type=float, default=5e-5, help="Learning rate"
-    )
-    parser.add_argument(
-        "--epochs", type=int, default=3, help="Number of training epochs"
-    )
-    parser.add_argument(
-        "--use_wandb", action="store_true", help="Log training to Weights & Biases"
+        default="configs/training_config.yaml",
+        help="Path to the training configuration YAML file.",
     )
     args = parser.parse_args()
-    main(args)
+    main(args.config)
