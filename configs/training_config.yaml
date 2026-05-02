@@ -18,7 +18,7 @@ data:
   
 training:
   # DPO-specific hyperparameters
-  beta: 0.1                                                 # The regularization parameter for DPO
+  beta: 0.1                                                 # The regularisation parameter for DPO
   batch_size: 2                                             # DPO is memory intensive, so small batches are needed.
   gradient_accumulation_steps: 8                            # Accumulate gradients to simulate a larger batch size
   learning_rate: 2e-5
