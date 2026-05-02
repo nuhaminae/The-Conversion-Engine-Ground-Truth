@@ -50,17 +50,17 @@ plots:
     labels: ["Bad Output", "Good Output"]
 
 logging:
-  judge_log: "reports/evaluation/eval_fine_tuned_judge.log"
-  prompted_log: "reports/evaluation/eval_prompted_judge.log"
+  judge_log: "reports/evaluation/fine_tuned/eval_fine_tuned_judge.log"
+  prompted_log: "reports/evaluation/prompted/eval_prompted_judge.log"
   baseline_log: "reports/evaluation/eval_baseline.log"
 
 outputs:
-  fine_tuned_judge_metrics: "reports/evaluation/fine_tuned_judge_metrics.json"
-  fine_tuned_judge_pair_scores: "reports/evaluation/fine_tuned_judge_pair_scores.jsonl"
+  fine_tuned_judge_metrics: "reports/evaluation/fine_tuned/fine_tuned_judge_metrics.json"
+  fine_tuned_judge_pair_scores: "reports/evaluation/fine_tuned/fine_tuned_judge_pair_scores.jsonl"
   
-  prompted_judge_metrics: "reports/evaluation/prompted_judge_metrics.json"
-  prompted_judge_pointwise_scores: "reports/evaluation/prompted_judge_pointwise_scores.jsonl"
-  prompted_judge_pair_scores: "reports/evaluation/prompted_judge_pair_scores.jsonl"
+  prompted_judge_metrics: "reports/evaluation/prompted/prompted_judge_metrics.json"
+  prompted_judge_pointwise_scores: "reports/evaluation/prompted/prompted_judge_pointwise_scores.jsonl"
+  prompted_judge_pair_scores: "reports/evaluation/prompted/prompted_judge_pair_scores.jsonl"
 
   baseline_metrics: "reports/evaluation/baseline_metrics.json"
 
