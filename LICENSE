@@ -1,0 +1,79 @@
+# `LICENSE`
+
+Repository License
+
+Copyright (c) 2026 Nuhamin Alemayehu
+
+This repository contains multiple artifact types. Unless a file states otherwise, the following terms apply.
+
+1. Code License
+
+All source code, scripts, notebooks, and configuration files in this repository are released under the MIT License.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of the software and associated documentation files covered by this section
+(the "Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+2. Dataset License
+
+The Tenacious-Bench dataset files under tenacious_bench/ are intended for
+research, evaluation, and educational use. Unless otherwise specified, they
+are released under the Creative Commons Attribution 4.0 International License
+(CC BY 4.0).
+
+You are free to share and adapt the dataset, provided that appropriate
+credit is given.
+
+Suggested attribution:
+
+Tenacious-Bench v0.1, created by Nuhamin Alemayehu, 2026.
+
+3. Model Adapter and Weights
+
+The model adapter files under models/judge/ are LoRA/PEFT adapter artifacts
+trained from the base model:
+
+unsloth/Llama-3.2-1B-Instruct-bnb-4bit
+
+Use of the adapter may require compliance with the license and acceptable use
+terms of the underlying base model and any upstream model provider. Users are
+responsible for reviewing and complying with the applicable upstream license
+terms before using or redistributing the adapter.
+
+4. Third-Party Dependencies
+
+This repository may reference or depend on third-party libraries, models, or
+services including but not limited to Unsloth, Hugging Face Transformers, TRL,
+PEFT, PyTorch, OpenRouter, and Qwen. Those components are governed by their
+own licenses and terms.
+
+5. No Warranty
+
+All benchmark data, model artifacts, reports, and software are provided "as is"
+without warranty of any kind. The benchmark and judge model are research
+artifacts and are not certification that any sales-agent system is safe,
+accurate, compliant, or production-ready.
+
+6. Contact
+
+For questions about licensing or reuse, contact:
+
+Nuhamin Alemayehu
+GitHub: https://github.com/nuhaminae
