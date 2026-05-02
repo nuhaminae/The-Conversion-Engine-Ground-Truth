@@ -3,48 +3,65 @@
 """
 Train a Path B preference-tuned judge/critic for Tenacious-Bench using DPO.
 
-Input:
+This script follows the official Unsloth DPO notebook pattern:
+- Import Unsloth before TRL/Transformers/PEFT.
+- Patch DPOTrainer with PatchDPOTrainer().
+- Load the base model in 4-bit.
+- Add LoRA adapters with use_gradient_checkpointing="unsloth".
+- Train on prompt/chosen/rejected JSONL preference data.
+
+Expected input:
   data/training_data/preferences_train.jsonl
   data/training_data/preferences_dev.jsonl
 
-Each row must contain:
+Expected columns:
   prompt, chosen, rejected
 
 Outputs:
   models/checkpoints/
   models/judge/
-  reports/training/training_summary.json
   reports/training/training_config_used.yaml
+  reports/training/dataset_summary.json
+  reports/training/training_summary.json
 """
 
-# Disable TensorFlow/Flax paths before Transformers/Unsloth import.
-# This avoids Colab protobuf/TensorFlow import conflicts for PyTorch-only training.
+# -----------------------------
+# Environment flags before imports
+# -----------------------------
 import os
+
 os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("USE_FLAX", "0")
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 
-# IMPORTANT: Unsloth must be imported before trl / transformers / peft.
+# -----------------------------
+# Unsloth imports FIRST
+# -----------------------------
 from unsloth import FastLanguageModel, PatchDPOTrainer, is_bfloat16_supported
+
 PatchDPOTrainer()
 
+# -----------------------------
+# Standard imports after Unsloth
+# -----------------------------
 import argparse
+import inspect
 import json
 import shutil
 import time
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-import wandb
 import yaml
 from datasets import load_dataset
 from dotenv import load_dotenv
 from huggingface_hub import login
-from trl import DPOTrainer, DPOConfig
+from trl import DPOConfig, DPOTrainer
 
 
 # -----------------------------
-# Helpers
+# Utility helpers
 # -----------------------------
 def ensure_dir(path: str) -> None:
     Path(path).mkdir(parents=True, exist_ok=True)
@@ -62,7 +79,7 @@ def save_yaml(data: Dict[str, Any], path: str) -> None:
         yaml.safe_dump(data, f, sort_keys=False)
 
 
-def get_optional(config: Dict[str, Any], *keys: str, default: Any = None) -> Any:
+def get_nested(config: Dict[str, Any], *keys: str, default: Any = None) -> Any:
     current = config
     for key in keys:
         if not isinstance(current, dict) or key not in current:
@@ -72,46 +89,35 @@ def get_optional(config: Dict[str, Any], *keys: str, default: Any = None) -> Any
 
 
 # -----------------------------
-# Environment and auth
+# Auth
 # -----------------------------
-def authenticate_services(config: Dict[str, Any]) -> Tuple[str, str]:
+def authenticate(config: Dict[str, Any]) -> str:
     load_dotenv()
 
     hf_token = os.getenv("HF_TOKEN", "").strip()
+    use_wandb = bool(get_nested(config, "reporting", "use_wandb", default=False))
     wandb_api_key = os.getenv("WANDB_API_KEY", "").strip()
-    use_wandb = bool(get_optional(config, "reporting", "use_wandb", default=False))
 
     if hf_token:
-        # Current huggingface_hub authentication path.
-        # This makes the token available to model downloads and Hub operations.
         login(token=hf_token, add_to_git_credential=False)
-        print("Hugging Face Hub authenticated with login().")
+        print("Hugging Face authentication: enabled")
     else:
-        print("No HF_TOKEN found. This is OK for public models and no Hub push.")
+        print("Hugging Face authentication: skipped; OK for public models")
 
-    if wandb_api_key and use_wandb:
-        wandb.login(key=wandb_api_key)
-        wandb.init(
-            project=get_optional(config, "reporting", "wandb_project", default="tenacious-judge"),
-            name=get_optional(config, "reporting", "wandb_run_name", default="dpo-judge"),
-            config=config,
-        )
-        print("W&B tracking initialised.")
-    else:
+    if not (use_wandb and wandb_api_key):
         os.environ["WANDB_DISABLED"] = "true"
-        print("W&B disabled.")
+        print("W&B: disabled")
+    else:
+        os.environ.pop("WANDB_DISABLED", None)
+        print("W&B: enabled by config/env")
 
-    return hf_token, wandb_api_key
+    return hf_token
 
 
 # -----------------------------
-# Data loading
+# Data
 # -----------------------------
 def load_dpo_dataset(data_config: Dict[str, Any]):
-    """
-    Loads explicit train/dev preference-pair JSONL files.
-    Required columns: prompt, chosen, rejected.
-    """
     data_files = {
         "train": data_config["train_file"],
         "validation": data_config["dev_file"],
@@ -121,8 +127,7 @@ def load_dpo_dataset(data_config: Dict[str, Any]):
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"{split} file not found: {path}. "
-                "Expected data/training_data/preferences_train.jsonl and "
-                "data/training_data/preferences_dev.jsonl after Stage 1."
+                "Run create_preference_pairs.py first and confirm data/training_data exists."
             )
 
     print(f"Loading DPO dataset from: {data_files}")
@@ -131,47 +136,135 @@ def load_dpo_dataset(data_config: Dict[str, Any]):
     required = {"prompt", "chosen", "rejected"}
 
     for split_name in ["train", "validation"]:
-        missing = required - set(dataset[split_name].column_names)
+        columns = set(dataset[split_name].column_names)
+        missing = required - columns
         if missing:
             raise ValueError(
-                f"{split_name} split is missing required DPO columns: {missing}. "
-                f"Columns found: {dataset[split_name].column_names}"
+                f"{split_name} split missing columns: {missing}. "
+                f"Found columns: {sorted(columns)}"
             )
 
-        bad_rows = []
+        bad_examples = []
         for idx, row in enumerate(dataset[split_name]):
             for key in required:
-                if not isinstance(row.get(key), str) or not row[key].strip():
-                    bad_rows.append((idx, key))
+                value = row.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    bad_examples.append({"row": idx, "field": key})
                     break
-            if len(bad_rows) >= 5:
+            if len(bad_examples) >= 5:
                 break
 
-        if bad_rows:
+        if bad_examples:
             raise ValueError(
-                f"{split_name} has empty/non-string prompt/chosen/rejected fields. "
-                f"Examples: {bad_rows}"
+                f"{split_name} split has invalid prompt/chosen/rejected values: "
+                f"{bad_examples}"
             )
 
-    print(f"Train pairs: {len(dataset['train'])}")
-    print(f"Validation pairs: {len(dataset['validation'])}")
+    print(f"Train preference pairs: {len(dataset['train'])}")
+    print(f"Validation preference pairs: {len(dataset['validation'])}")
 
     return dataset["train"], dataset["validation"]
 
 
 # -----------------------------
-# Main training
+# Trainer construction
+# -----------------------------
+def build_dpo_trainer(
+    model,
+    tokenizer,
+    train_dataset,
+    eval_dataset,
+    config: Dict[str, Any],
+):
+    data_config = config["data"]
+    training_config = config["training"]
+    output_config = config["output"]
+
+    dpo_args = DPOConfig(
+        output_dir=output_config["checkpoint_dir"],
+        per_device_train_batch_size=training_config.get("batch_size", 1),
+        per_device_eval_batch_size=training_config.get(
+            "eval_batch_size", training_config.get("batch_size", 1)
+        ),
+        gradient_accumulation_steps=training_config.get(
+            "gradient_accumulation_steps", 4
+        ),
+        warmup_ratio=training_config.get("warmup_ratio", 0.1),
+        num_train_epochs=training_config.get("num_epochs", 1),
+        learning_rate=training_config.get("learning_rate", 5e-6),
+        fp16=not is_bfloat16_supported(),
+        bf16=is_bfloat16_supported(),
+        logging_steps=training_config.get("logging_steps", 1),
+        optim=training_config.get("optim", "adamw_8bit"),
+        weight_decay=training_config.get("weight_decay", 0.0),
+        lr_scheduler_type=training_config.get("lr_scheduler_type", "linear"),
+        seed=config.get("seed", 42),
+        save_strategy=training_config.get("save_strategy", "epoch"),
+        eval_strategy=training_config.get(
+            "eval_strategy",
+            training_config.get("evaluation_strategy", "epoch"),
+        ),
+        report_to="none",
+        remove_unused_columns=False,
+        beta=training_config.get("beta", 0.1),
+        max_length=data_config.get("max_length", 1024),
+        max_prompt_length=data_config.get(
+            "max_prompt_length", data_config.get("max_length", 1024) // 2
+        ),
+    )
+
+    # Newer TRL expects processing_class. Older/Unsloth-patched patterns often accept tokenizer.
+    signature = inspect.signature(DPOTrainer.__init__)
+    kwargs = {
+        "model": model,
+        "ref_model": None,
+        "args": dpo_args,
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset,
+    }
+
+    if "processing_class" in signature.parameters:
+        kwargs["processing_class"] = tokenizer
+    else:
+        kwargs["tokenizer"] = tokenizer
+
+    try:
+        return DPOTrainer(**kwargs)
+    except TypeError as first_error:
+        print(
+            "First DPOTrainer construction failed; trying Unsloth notebook-style fallback."
+        )
+        print(f"First error: {first_error}")
+
+        # Fallback closer to older Unsloth notebook signatures.
+        fallback_kwargs = {
+            "model": model,
+            "ref_model": None,
+            "args": dpo_args,
+            "beta": training_config.get("beta", 0.1),
+            "train_dataset": train_dataset,
+            "eval_dataset": eval_dataset,
+            "tokenizer": tokenizer,
+            "max_length": data_config.get("max_length", 1024),
+            "max_prompt_length": data_config.get(
+                "max_prompt_length", data_config.get("max_length", 1024) // 2
+            ),
+        }
+        return DPOTrainer(**fallback_kwargs)
+
+
+# -----------------------------
+# Main
 # -----------------------------
 def main(config_path: str) -> None:
-    started_at = time.time()
+    started = time.time()
 
-    print("Loading configuration from:", config_path)
+    print(f"Loading config: {config_path}")
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     model_config = config["model"]
     data_config = config["data"]
-    training_config = config["training"]
     output_config = config["output"]
 
     report_dir = output_config.get("report_dir", "reports/training")
@@ -184,12 +277,14 @@ def main(config_path: str) -> None:
 
     save_yaml(config, os.path.join(report_dir, "training_config_used.yaml"))
 
-    hf_token, wandb_api_key = authenticate_services(config)
+    hf_token = authenticate(config)
 
-    print(f"Loading base model with Unsloth: {model_config['base_model']}")
+    max_seq_length = data_config.get("max_length", 1024)
+
+    print(f"Loading base model: {model_config['base_model']}")
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_config["base_model"],
-        max_seq_length=data_config["max_length"],
+        max_seq_length=max_seq_length,
         dtype=None,
         load_in_4bit=True,
         token=hf_token or None,
@@ -199,101 +294,57 @@ def main(config_path: str) -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    print("Configuring LoRA adapter.")
+    print("Adding LoRA adapters.")
     model = FastLanguageModel.get_peft_model(
         model,
-        r=model_config["lora"]["r"],
-        target_modules=model_config["lora"]["target_modules"],
-        lora_alpha=model_config["lora"]["alpha"],
-        lora_dropout=model_config["lora"]["dropout"],
+        r=model_config["lora"].get("r", 16),
+        target_modules=model_config["lora"].get(
+            "target_modules",
+            [
+                "q_proj",
+                "k_proj",
+                "v_proj",
+                "o_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj",
+            ],
+        ),
+        lora_alpha=model_config["lora"].get("alpha", 16),
+        lora_dropout=model_config["lora"].get("dropout", 0),
         bias="none",
         use_gradient_checkpointing="unsloth",
         random_state=config.get("seed", 42),
-        max_seq_length=data_config["max_length"],
+        max_seq_length=max_seq_length,
     )
 
-    print("Loading DPO preference data.")
     train_dataset, eval_dataset = load_dpo_dataset(data_config)
 
-    dataset_summary = {
-        "train_file": data_config["train_file"],
-        "dev_file": data_config["dev_file"],
-        "train_pairs": len(train_dataset),
-        "validation_pairs": len(eval_dataset),
-        "required_columns": ["prompt", "chosen", "rejected"],
-    }
-    save_json(dataset_summary, os.path.join(report_dir, "dataset_summary.json"))
-
-    report_to = (
-        "wandb"
-        if wandb_api_key and get_optional(config, "reporting", "use_wandb", default=False)
-        else "none"
+    save_json(
+        {
+            "train_file": data_config["train_file"],
+            "dev_file": data_config["dev_file"],
+            "train_pairs": len(train_dataset),
+            "validation_pairs": len(eval_dataset),
+            "columns": ["prompt", "chosen", "rejected"],
+        },
+        os.path.join(report_dir, "dataset_summary.json"),
     )
 
-    # DPOConfig is the current TRL config object for DPOTrainer.
-    dpo_args = DPOConfig(
-        output_dir=checkpoint_dir,
-        per_device_train_batch_size=training_config["batch_size"],
-        per_device_eval_batch_size=training_config.get(
-            "eval_batch_size", training_config["batch_size"]
-        ),
-        gradient_accumulation_steps=training_config["gradient_accumulation_steps"],
-        num_train_epochs=training_config["num_epochs"],
-        learning_rate=training_config["learning_rate"],
-        warmup_ratio=training_config.get("warmup_ratio", 0.1),
-        weight_decay=training_config.get("weight_decay", 0.0),
-        lr_scheduler_type=training_config.get("lr_scheduler_type", "linear"),
-        logging_steps=training_config.get("logging_steps", 1),
-        save_strategy=training_config.get("save_strategy", "epoch"),
-        eval_strategy=training_config.get(
-            "eval_strategy",
-            training_config.get("evaluation_strategy", "epoch"),
-        ),
-        seed=config.get("seed", 42),
-        optim=training_config.get("optim", "adamw_8bit"),
-        fp16=not is_bfloat16_supported(),
-        bf16=is_bfloat16_supported(),
-        beta=training_config.get("beta", 0.1),
-        max_length=data_config["max_length"],
-        max_prompt_length=data_config.get("max_prompt_length", data_config["max_length"] // 2),
-        report_to=report_to,
-        remove_unused_columns=False,
-    )
+    print("Building DPOTrainer.")
+    trainer = build_dpo_trainer(model, tokenizer, train_dataset, eval_dataset, config)
 
-    print("Initialising DPOTrainer.")
-    try:
-        # Newer TRL versions use processing_class instead of tokenizer.
-        dpo_trainer = DPOTrainer(
-            model=model,
-            ref_model=None,
-            args=dpo_args,
-            train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
-            processing_class=tokenizer,
-        )
-    except TypeError:
-        # Compatibility fallback for older TRL releases.
-        dpo_trainer = DPOTrainer(
-            model=model,
-            ref_model=None,
-            args=dpo_args,
-            train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
-            tokenizer=tokenizer,
-        )
+    print("\n--- Starting DPO training ---\n")
+    train_result = trainer.train()
+    print("\n--- DPO training complete ---\n")
 
-    print("\n--- Starting DPO Training ---\n")
-    train_result = dpo_trainer.train()
-    print("\n--- DPO Training Complete ---\n")
+    print("Evaluating on dev split.")
+    eval_metrics = trainer.evaluate()
 
-    print("Running final validation evaluation.")
-    eval_metrics = dpo_trainer.evaluate()
-
-    print(f"Saving final LoRA adapter to {model_dir}")
-    dpo_trainer.model.save_pretrained(model_dir)
+    print(f"Saving LoRA adapter to: {model_dir}")
+    trainer.model.save_pretrained(model_dir)
     tokenizer.save_pretrained(model_dir)
 
-    # Copy trainer state if available.
     trainer_state = Path(checkpoint_dir) / "trainer_state.json"
     if trainer_state.exists():
         shutil.copy2(trainer_state, Path(report_dir) / "trainer_state.json")
@@ -308,28 +359,25 @@ def main(config_path: str) -> None:
         "validation_pairs": len(eval_dataset),
         "train_metrics": getattr(train_result, "metrics", {}),
         "eval_metrics": eval_metrics,
-        "runtime_seconds": round(time.time() - started_at, 2),
+        "runtime_seconds": round(time.time() - started, 2),
         "seed": config.get("seed", 42),
     }
 
     save_json(summary, os.path.join(report_dir, "training_summary.json"))
 
-    if wandb_api_key and get_optional(config, "reporting", "use_wandb", default=False):
-        wandb.finish()
-
-    print("\nTraining summary:")
+    print("\nTraining summary")
     print(json.dumps(summary, indent=2))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Train a DPO preference-tuned judge for Tenacious-Bench."
+        description="Train Tenacious-Bench DPO judge with Unsloth."
     )
     parser.add_argument(
         "--config",
         type=str,
         default="configs/training_config.yaml",
-        help="Path to training_config.yaml.",
+        help="Path to configs/training_config.yaml",
     )
     args = parser.parse_args()
     main(args.config)
