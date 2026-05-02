@@ -18,9 +18,9 @@ The fine-tuned judge is correct when:
   reward(chosen) > reward(rejected)
 
 Outputs:
-  reports/fine_tuned_judge_metrics.json
-  reports/fine_tuned_judge_pair_scores.jsonl
-  reports/fine_tuned_judge_confusion_matrix.png
+  reports/fine_tuned/fine_tuned_judge_metrics.json
+  reports/fine_tuned/fine_tuned_judge_pair_scores.jsonl
+  reports/fine_tuned/fine_tuned_judge_confusion_matrix.png
 """
 
 import argparse
